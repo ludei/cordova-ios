@@ -391,6 +391,11 @@
     }
 }
 
+- (BOOL)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)interfaceOrientation
+{
+    return [self supportsOrientation:interfaceOrientation];
+}
+
 - (void)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)interfaceOrientation completionHandler:(void (^)(BOOL))completionHandler
 {
     // First, ask the webview via JS if it supports the new orientation

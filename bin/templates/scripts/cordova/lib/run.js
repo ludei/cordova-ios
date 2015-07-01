@@ -50,7 +50,7 @@ module.exports.run = function (argv) {
     // Valid values for "--target" (case sensitive):
     var validTargets = ['iPhone-4s', 'iPhone-5', 'iPhone-5s', 'iPhone-6-Plus', 'iPhone-6',
         'iPad-2', 'iPad-Retina', 'iPad-Air', 'Resizable-iPhone', 'Resizable-iPad'];
-    if (args.target && validTargets.indexOf(args.target) < 0 ) {
+    if (!(args.device) && args.target && validTargets.indexOf(args.target.split(',')[0]) < 0 ) {
         return Q.reject(args.target + ' is not a valid target for emulator');
     }
 
@@ -64,24 +64,48 @@ module.exports.run = function (argv) {
         });
     }
 
-    // check for either ios-sim or ios-deploy is available
-    // depending on arguments provided
-    var checkTools = args.device ? check_reqs.check_ios_deploy() : check_reqs.check_ios_sim();
-
-    return checkTools.then(function () {
-        // if --nobuild isn't specified then build app first
+    var useDevice = false;
+    
+    return require('./list-devices').run()
+    .then(function (devices) {
+        if (devices.length > 0 && !(args.emulator)) {
+            useDevice = true;
+            return check_reqs.check_ios_deploy();
+        } else {
+            return check_reqs.check_ios_sim();
+        }
+    }).then(function () {
         if (!args.nobuild) {
+            var idx = -1;
+            if (useDevice) {
+                // remove emulator, add device
+                idx = argv.indexOf('--emulator');
+                if (idx != -1) {
+                    argv.splice(idx, 1);
+                }
+                argv.push('--device');
+            } else {
+                // remove device, add emulator
+                idx = argv.indexOf('--device');
+                if (idx != -1) {
+                    argv.splice(idx, 1);
+                }
+                argv.push('--emulator');
+            }
             return build.run(argv);
+        } else {
+            return Q.resolve();
         }
     }).then(function () {
         return build.findXCodeProjectIn(projectPath);
     }).then(function (projectName) {
-        var appPath = path.join(projectPath, 'build', (args.device ? 'device' : 'emulator'), projectName + '.app');
+        var appPath = path.join(projectPath, 'build', 'emulator', projectName + '.app');
         // select command to run and arguments depending whether
         // we're running on device/emulator
-        if (args.device) {
+        if (useDevice) {
             return checkDeviceConnected().then(function () {
-                return deployToDevice(appPath);
+                appPath = path.join(projectPath, 'build', 'device', projectName + '.app');
+                return deployToDevice(appPath, args.target);
             }, function () {
                 // if device connection check failed use emulator then
                 return deployToSim(appPath, args.target);
@@ -97,7 +121,7 @@ module.exports.run = function (argv) {
  * @return {Promise} Fullfilled when any device is connected, rejected otherwise
  */
 function checkDeviceConnected() {
-    return spawn('ios-deploy', ['-c']);
+    return spawn('ios-deploy', ['-c', '-t', '1']);
 }
 
 /**
@@ -106,9 +130,13 @@ function checkDeviceConnected() {
  * @param  {String} appPath Path to application package
  * @return {Promise}        Resolves when deploy succeeds otherwise rejects
  */
-function deployToDevice(appPath) {
+function deployToDevice(appPath, target) {
     // Deploying to device...
-    return spawn('ios-deploy', ['-d', '-b', appPath]);
+    if (target) {
+        return spawn('ios-deploy', ['--justlaunch', '-d', '-b', appPath, '-i', target]);
+    } else {
+        return spawn('ios-deploy', ['--justlaunch', '-d', '-b', appPath]);
+    }
 }
 
 /**

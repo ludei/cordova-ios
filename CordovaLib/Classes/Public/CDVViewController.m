@@ -25,10 +25,8 @@
 #import "CDVUserAgentUtil.h"
 #import <AVFoundation/AVFoundation.h>
 #import "NSDictionary+CordovaPreferences.h"
-#import "CDVHandleOpenURL.h"
+#import "CDVLocalStorage.h"
 #import "CDVCommandDelegateImpl.h"
-
-#define degreesToRadian(x) (M_PI * (x) / 180.0)
 
 @interface CDVViewController () {
     NSInteger _userAgentLockToken;
@@ -40,7 +38,6 @@
 @property (nonatomic, readwrite, strong) NSMutableArray* startupPluginNames;
 @property (nonatomic, readwrite, strong) NSDictionary* pluginsMap;
 @property (nonatomic, readwrite, strong) NSArray* supportedOrientations;
-@property (nonatomic, readwrite, assign) BOOL loadFromString;
 @property (nonatomic, readwrite, strong) id <CDVWebViewEngineProtocol> webViewEngine;
 
 @property (readwrite, assign) BOOL initialized;
@@ -53,7 +50,7 @@
 
 @synthesize supportedOrientations;
 @synthesize pluginObjects, pluginsMap, startupPluginNames;
-@synthesize configParser, settings, loadFromString;
+@synthesize configParser, settings;
 @synthesize wwwFolderName, startPage, initialized, openURL, baseUserAgent;
 @synthesize commandDelegate = _commandDelegate;
 @synthesize commandQueue = _commandQueue;
@@ -112,16 +109,6 @@
     return self;
 }
 
-- (void)viewWillAppear:(BOOL)animated
-{
-    [super viewWillAppear:animated];
-}
-
-- (void)viewWillDisappear:(BOOL)animated
-{
-    [super viewWillDisappear:animated];
-}
-
 - (void)printVersion
 {
     NSLog(@"Apache Cordova native platform version %@ is starting.", CDV_VERSION);
@@ -158,7 +145,7 @@
     return [self shouldAllowNavigationToURL:url];
 }
 
-- (void)parseSettingsWithParser:(NSObject<NSXMLParserDelegate> *)delegate
+- (void)parseSettingsWithParser:(NSObject <NSXMLParserDelegate>*)delegate
 {
     // read from config.xml in the app bundle
     NSString* path = [[NSBundle mainBundle] pathForResource:@"config" ofType:@"xml"];
@@ -182,6 +169,7 @@
 - (void)loadSettings
 {
     CDVConfigParser* delegate = [[CDVConfigParser alloc] init];
+
     [self parseSettingsWithParser:delegate];
 
     // Get the plugin dictionary, whitelist and settings from the delegate.
@@ -214,7 +202,6 @@
         NSString* startFilePath = [self.commandDelegate pathForResource:[startURL path]];
 
         if (startFilePath == nil) {
-            self.loadFromString = YES;
             appURL = nil;
         } else {
             appURL = [NSURL fileURLWithPath:startFilePath];
@@ -231,26 +218,26 @@
     return appURL;
 }
 
-- (NSURL*)errorUrl
+- (NSURL*)errorURL
 {
-    NSURL* errorURL = nil;
+    NSURL* errorUrl = nil;
 
     id setting = [self.settings cordovaSettingForKey:@"ErrorUrl"];
 
     if (setting) {
         NSString* errorUrlString = (NSString*)setting;
         if ([errorUrlString rangeOfString:@"://"].location != NSNotFound) {
-            errorURL = [NSURL URLWithString:errorUrlString];
+            errorUrl = [NSURL URLWithString:errorUrlString];
         } else {
             NSURL* url = [NSURL URLWithString:(NSString*)setting];
             NSString* errorFilePath = [self.commandDelegate pathForResource:[url path]];
             if (errorFilePath) {
-                errorURL = [NSURL fileURLWithPath:errorFilePath];
+                errorUrl = [NSURL fileURLWithPath:errorFilePath];
             }
         }
     }
 
-    return errorURL;
+    return errorUrl;
 }
 
 - (UIView*)webView
@@ -267,8 +254,6 @@
 {
     [super viewDidLoad];
 
-    // // Fix the iOS 5.1 SECURITY_ERR bug (CB-347), this must be before the webView is instantiated ////
-
     NSString* backupWebStorageType = @"cloud"; // default value
 
     id backupWebStorage = [self.settings cordovaSettingForKey:@"BackupWebStorage"];
@@ -276,6 +261,8 @@
         backupWebStorageType = backupWebStorage;
     }
     [self.settings setCordovaSetting:backupWebStorageType forKey:@"BackupWebStorage"];
+    
+    [CDVLocalStorage __fixupDatabaseLocationsWithBackupType:backupWebStorageType];
 
     // // Instantiate the WebView ///////////////
 
@@ -290,7 +277,7 @@
 
     /*
      * Fire up CDVLocalStorage to work-around WebKit storage limitations: on all iOS 5.1+ versions for local-only backups, but only needed on iOS 5.1 for cloud backup.
-        With minimum iOS 6/7 supported, only first clause applies.
+        With minimum iOS 7/8 supported, only first clause applies.
      */
     if ([backupWebStorageType isEqualToString:@"local"]) {
         NSString* localStorageFeatureName = @"localstorage";
@@ -324,7 +311,7 @@
             NSString* loadErr = [NSString stringWithFormat:@"ERROR: Start Page at '%@/%@' was not found.", self.wwwFolderName, self.startPage];
             NSLog(@"%@", loadErr);
 
-            NSURL* errorUrl = [self errorUrl];
+            NSURL* errorUrl = [self errorURL];
             if (errorUrl) {
                 errorUrl = [NSURL URLWithString:[NSString stringWithFormat:@"?error=%@", [loadErr stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]] relativeToURL:errorUrl];
                 NSLog(@"%@", [errorUrl absoluteString]);
@@ -418,16 +405,16 @@
 {
     NSUInteger ret = 0;
 
-    if ([self shouldAutorotateToInterfaceOrientation:UIInterfaceOrientationPortrait]) {
+    if ([self supportsOrientation:UIInterfaceOrientationPortrait]) {
         ret = ret | (1 << UIInterfaceOrientationPortrait);
     }
-    if ([self shouldAutorotateToInterfaceOrientation:UIInterfaceOrientationPortraitUpsideDown]) {
+    if ([self supportsOrientation:UIInterfaceOrientationPortraitUpsideDown]) {
         ret = ret | (1 << UIInterfaceOrientationPortraitUpsideDown);
     }
-    if ([self shouldAutorotateToInterfaceOrientation:UIInterfaceOrientationLandscapeRight]) {
+    if ([self supportsOrientation:UIInterfaceOrientationLandscapeRight]) {
         ret = ret | (1 << UIInterfaceOrientationLandscapeRight);
     }
-    if ([self shouldAutorotateToInterfaceOrientation:UIInterfaceOrientationLandscapeLeft]) {
+    if ([self supportsOrientation:UIInterfaceOrientationLandscapeLeft]) {
         ret = ret | (1 << UIInterfaceOrientationLandscapeLeft);
     }
 
@@ -468,13 +455,22 @@
 
 - (NSString*)userAgent
 {
-    if (_userAgent == nil) {
-        NSString* localBaseUserAgent;
-        if (self.baseUserAgent != nil) {
-            localBaseUserAgent = self.baseUserAgent;
-        } else {
-            localBaseUserAgent = [CDVUserAgentUtil originalUserAgent];
-        }
+    if (_userAgent != nil) {
+        return _userAgent;
+    }
+
+    NSString* localBaseUserAgent;
+    if (self.baseUserAgent != nil) {
+        localBaseUserAgent = self.baseUserAgent;
+    } else if ([self.settings cordovaSettingForKey:@"OverrideUserAgent"] != nil) {
+        localBaseUserAgent = [self.settings cordovaSettingForKey:@"OverrideUserAgent"];
+    } else {
+        localBaseUserAgent = [CDVUserAgentUtil originalUserAgent];
+    }
+    NSString* appendUserAgent = [self.settings cordovaSettingForKey:@"AppendUserAgent"];
+    if (appendUserAgent) {
+        _userAgent = [NSString stringWithFormat:@"%@ %@", localBaseUserAgent, appendUserAgent];
+    } else {
         // Use our address as a unique number to append to the User-Agent.
         _userAgent = [NSString stringWithFormat:@"%@ (%lld)", localBaseUserAgent, (long long)self];
     }
@@ -529,138 +525,12 @@
     [super viewDidUnload];
 }
 
-#pragma mark UIWebViewDelegate
-
-/**
- When web application loads Add stuff to the DOM, mainly the user-defined settings from the Settings.plist file, and
- the device's data such as device ID, platform version, etc.
- */
-- (void)webViewDidStartLoad:(UIWebView*)theWebView
-{
-    NSLog(@"Resetting plugins due to page load.");
-    [_commandQueue resetRequestId];
-    [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPluginResetNotification object:self.webView]];
-}
-
-/**
- Called when the webview finishes loading.  This stops the activity view.
- */
-- (void)webViewDidFinishLoad:(UIWebView*)theWebView
-{
-    NSLog(@"Finished load of: %@", theWebView.request.URL);
-    // It's safe to release the lock even if this is just a sub-frame that's finished loading.
-    [CDVUserAgentUtil releaseLock:&_userAgentLockToken];
-
-    /*
-     * Hide the Top Activity THROBBER in the Battery Bar
-     */
-    [[UIApplication sharedApplication] setNetworkActivityIndicatorVisible:NO];
-
-    [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPageDidLoadNotification object:self.webView]];
-}
-
-- (void)webView:(UIWebView*)theWebView didFailLoadWithError:(NSError*)error
-{
-    [CDVUserAgentUtil releaseLock:&_userAgentLockToken];
-
-    NSString* message = [NSString stringWithFormat:@"Failed to load webpage with error: %@", [error localizedDescription]];
-    NSLog(@"%@", message);
-
-    NSURL* errorUrl = [self errorUrl];
-    if (errorUrl) {
-        errorUrl = [NSURL URLWithString:[NSString stringWithFormat:@"?error=%@", [message stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]] relativeToURL:errorUrl];
-        NSLog(@"%@", [errorUrl absoluteString]);
-        [theWebView loadRequest:[NSURLRequest requestWithURL:errorUrl]];
-    }
-}
-
-- (BOOL)webView:(UIWebView*)theWebView shouldStartLoadWithRequest:(NSURLRequest*)request navigationType:(UIWebViewNavigationType)navigationType
-{
-    NSURL* url = [request URL];
-
-    /*
-     * Execute any commands queued with cordova.exec() on the JS side.
-     * The part of the URL after gap:// is irrelevant.
-     */
-    if ([[url scheme] isEqualToString:@"gap"]) {
-        [_commandQueue fetchCommandsFromJs];
-        // The delegate is called asynchronously in this case, so we don't have to use
-        // flushCommandQueueWithDelayedJs (setTimeout(0)) as we do with hash changes.
-        [_commandQueue executePending];
-        return NO;
-    }
-
-    if ([[url fragment] hasPrefix:@"%01"] || [[url fragment] hasPrefix:@"%02"]) {
-        // Delegate is called *immediately* for hash changes. This means that any
-        // calls to stringByEvaluatingJavascriptFromString will occur in the middle
-        // of an existing (paused) call stack. This doesn't cause errors, but may
-        // be unexpected to callers (exec callbacks will be called before exec() even
-        // returns). To avoid this, we do not do any synchronous JS evals by using
-        // flushCommandQueueWithDelayedJs.
-        NSString* inlineCommands = [[url fragment] substringFromIndex:3];
-        if ([inlineCommands length] == 0) {
-            // Reach in right away since the WebCore / Main thread are already synchronized.
-            [_commandQueue fetchCommandsFromJs];
-        } else {
-            inlineCommands = [inlineCommands stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
-            [_commandQueue enqueueCommandBatch:inlineCommands];
-        }
-        // Switch these for minor performance improvements, and to really live on the wild side.
-        // Callbacks will occur in the middle of the location.hash = ... statement!
-        [(CDVCommandDelegateImpl*)_commandDelegate flushCommandQueueWithDelayedJs];
-        // [_commandQueue executePending];
-
-        // Although we return NO, the hash change does end up taking effect.
-        return NO;
-    }
-
-    /*
-     * Give plugins the chance to handle the url
-     */
-    for (NSString* pluginName in pluginObjects) {
-        CDVPlugin* plugin = [pluginObjects objectForKey:pluginName];
-        SEL selector = NSSelectorFromString(@"shouldOverrideLoadWithRequest:navigationType:");
-        if ([plugin respondsToSelector:selector]) {
-            if (((BOOL (*)(id, SEL, id, int))objc_msgSend)(plugin, selector, request, navigationType)) {
-                return NO;
-            }
-        }
-    }
-
-    /*
-     *    If we loaded the HTML from a string, we let the app handle it
-     */
-    if (self.loadFromString) {
-        self.loadFromString = NO;
-        return YES;
-    }
-
-    /*
-     * Handle all other types of urls (tel:, sms:), and requests to load a url in the main webview.
-     */
-    BOOL shouldAllowNavigation = [self shouldAllowNavigationToURL:url];
-    if (shouldAllowNavigation) {
-        return YES;
-    } else {
-        BOOL shouldOpenExternalURL = [self shouldOpenExternalURL:url];
-        if (shouldOpenExternalURL) {
-            if ([[UIApplication sharedApplication] canOpenURL:url]) {
-                [[UIApplication sharedApplication] openURL:url];
-            } else { // handle any custom schemes to plugins
-                [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPluginHandleOpenURLNotification object:url]];
-            }
-        }
-    }
-
-    return NO;
-}
-
 #pragma mark Network Policy Plugin (Whitelist) hooks
 
 /* This implements the default policy for resource loading and navigation, if there
  * are no plugins installed which override the whitelist methods.
  */
-- (BOOL)defaultResourcePolicyForURL:(NSURL *)url
+- (BOOL)defaultResourcePolicyForURL:(NSURL*)url
 {
     /*
      * If a URL is being loaded that's a file/http/https URL, just load it internally
@@ -686,10 +556,11 @@
     return NO;
 }
 
-- (BOOL)shouldAllowRequestForURL:(NSURL *)url
+- (BOOL)shouldAllowRequestForURL:(NSURL*)url
 {
     BOOL anyPluginsResponded = NO;
     BOOL shouldAllowRequest = NO;
+
     for (NSString* pluginName in pluginObjects) {
         CDVPlugin* plugin = [pluginObjects objectForKey:pluginName];
         SEL selector = NSSelectorFromString(@"shouldAllowRequestForURL:");
@@ -701,6 +572,7 @@
             }
         }
     }
+
     if (anyPluginsResponded) {
         return shouldAllowRequest;
     }
@@ -709,11 +581,11 @@
     return [self defaultResourcePolicyForURL:url];
 }
 
-
-- (BOOL)shouldAllowNavigationToURL:(NSURL *)url
+- (BOOL)shouldAllowNavigationToURL:(NSURL*)url
 {
     BOOL anyPluginsResponded = NO;
     BOOL shouldAllowNavigation = NO;
+
     for (NSString* pluginName in pluginObjects) {
         CDVPlugin* plugin = [pluginObjects objectForKey:pluginName];
         SEL selector = NSSelectorFromString(@"shouldAllowNavigationToURL:");
@@ -725,6 +597,7 @@
             }
         }
     }
+
     if (anyPluginsResponded) {
         return shouldAllowNavigation;
     }
@@ -733,10 +606,11 @@
     return [self defaultResourcePolicyForURL:url];
 }
 
-- (BOOL)shouldOpenExternalURL:(NSURL *)url
+- (BOOL)shouldOpenExternalURL:(NSURL*)url
 {
     BOOL anyPluginsResponded = NO;
     BOOL shouldOpenExternalURL = NO;
+
     for (NSString* pluginName in pluginObjects) {
         CDVPlugin* plugin = [pluginObjects objectForKey:pluginName];
         SEL selector = NSSelectorFromString(@"shouldOpenExternalURL:");
@@ -748,29 +622,13 @@
             }
         }
     }
+
     if (anyPluginsResponded) {
         return shouldOpenExternalURL;
     }
 
     /* Default policy */
     return NO;
-}
-
-#pragma mark GapHelpers
-
-- (void)javascriptAlert:(NSString*)text
-{
-    NSString* jsString = [NSString stringWithFormat:@"alert('%@');", text];
-
-    [self.commandDelegate evalJs:jsString];
-}
-
-+ (NSString*)applicationDocumentsDirectory
-{
-    NSArray* paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString* basePath = (([paths count] > 0) ? ([paths objectAtIndex : 0]) : nil);
-
-    return basePath;
 }
 
 #pragma mark CordovaCommands
@@ -855,23 +713,6 @@
     return URLScheme;
 }
 
-/**
- Returns the contents of the named plist bundle, loaded as a dictionary object
- */
-+ (NSDictionary*)getBundlePlist:(NSString*)plistName
-{
-    NSString* errorDesc = nil;
-    NSPropertyListFormat format;
-    NSString* plistPath = [[NSBundle mainBundle] pathForResource:plistName ofType:@"plist"];
-    NSData* plistXML = [[NSFileManager defaultManager] contentsAtPath:plistPath];
-    NSDictionary* temp = (NSDictionary*)[NSPropertyListSerialization
-        propertyListFromData:plistXML
-            mutabilityOption:NSPropertyListMutableContainersAndLeaves
-                      format:&format errorDescription:&errorDesc];
-
-    return temp;
-}
-
 #pragma mark -
 #pragma mark UIApplicationDelegate impl
 
@@ -918,6 +759,13 @@
 {
     // NSLog(@"%@",@"applicationWillEnterForeground");
     [self.commandDelegate evalJs:@"cordova.fireDocumentEvent('resume');"];
+
+    /** Clipboard fix **/
+    UIPasteboard* pasteboard = [UIPasteboard generalPasteboard];
+    NSString* string = pasteboard.string;
+    if (string) {
+        [pasteboard setValue:string forPasteboardType:@"public.text"];
+    }
 }
 
 // This method is called to let your application know that it moved from the inactive to active state.
@@ -947,6 +795,11 @@
     [CDVUserAgentUtil releaseLock:&_userAgentLockToken];
     [_commandQueue dispose];
     [[self.pluginObjects allValues] makeObjectsPerformSelector:@selector(dispose)];
+}
+
+- (NSInteger*)userAgentLockToken
+{
+    return &_userAgentLockToken;
 }
 
 @end

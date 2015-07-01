@@ -26,8 +26,9 @@
 #import "CDVScreenOrientationDelegate.h"
 #import "CDVPlugin.h"
 #import "CDVWebViewEngineProtocol.h"
+#import "CDVURLRequestFilter.h"
 
-@interface CDVViewController : UIViewController <UIWebViewDelegate, CDVScreenOrientationDelegate>{
+@interface CDVViewController : UIViewController <CDVScreenOrientationDelegate, CDVURLRequestFilter >{
     @protected
     id <CDVWebViewEngineProtocol> _webViewEngine;
     @protected
@@ -43,7 +44,6 @@
 @property (nonatomic, readonly, strong) NSDictionary* pluginsMap;
 @property (nonatomic, readonly, strong) NSMutableDictionary* settings;
 @property (nonatomic, readonly, strong) NSXMLParser* configParser;
-@property (nonatomic, readonly, assign) BOOL loadFromString;
 
 @property (nonatomic, readwrite, copy) NSString* wwwFolderName;
 @property (nonatomic, readwrite, copy) NSString* startPage;
@@ -63,15 +63,15 @@
  */
 @property (nonatomic, readwrite, copy) NSString* baseUserAgent;
 
-+ (NSDictionary*)getBundlePlist:(NSString*)plistName;
-+ (NSString*)applicationDocumentsDirectory;
+/**
+ The address of the lock token used for controlling access to setting the user-agent
+ */
+@property (nonatomic, readonly) NSInteger* userAgentLockToken;
 
-- (void)printMultitaskingInfo;
-- (void)createGapView;
 - (UIView*)newCordovaViewWithFrame:(CGRect)bounds;
 
-- (void)javascriptAlert:(NSString*)text;
 - (NSString*)appURLScheme;
+- (NSURL*)errorURL;
 
 - (NSArray*)parseInterfaceOrientations:(NSArray*)orientations;
 - (BOOL)supportsOrientation:(UIInterfaceOrientation)orientation;
@@ -81,10 +81,11 @@
 - (void)registerPlugin:(CDVPlugin*)plugin withPluginName:(NSString*)pluginName;
 
 - (BOOL)URLisAllowed:(NSURL*)url __attribute__((deprecated("Scheduled for removal in 5.0. Use shouldAllowRequestForURL, shouldAllowNavigationToURL or shouldOpenExternalURL instead.")));
-- (BOOL)shouldAllowRequestForURL:(NSURL *)url;
-- (BOOL)shouldAllowNavigationToURL:(NSURL *)url;
-- (BOOL)shouldOpenExternalURL:(NSURL *)url;
 
-- (void)parseSettingsWithParser:(NSObject<NSXMLParserDelegate> *)delegate;
+- (BOOL)shouldAllowRequestForURL:(NSURL*)url;
+- (BOOL)shouldAllowNavigationToURL:(NSURL*)url;
+- (BOOL)shouldOpenExternalURL:(NSURL*)url;
+
+- (void)parseSettingsWithParser:(NSObject <NSXMLParserDelegate>*)delegate;
 
 @end
